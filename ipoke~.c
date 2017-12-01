@@ -1,31 +1,49 @@
-/**
-	@file
-	ipoke~: a simple audio object for Max
-	original by: jeremy bernstein, jeremy@bootsquad.com
-	@ingroup examples
-*/
+//    ipoke~ - a buffer writter with skipped address filling feature (interpolated or not)
+//    by Pierre Alexandre Tremblay
+//    v.2 optimised at the University of Huddersfield, with the help of the dev@cycling74.com comments of Mark Pauley, Alex Harker, Ben Neville and Peter Castine, addressed  to me or to others.
+//    v.3 updated for Max5
+//    v.4 added overdub ratio and Max6 support
+//    v.4.1 adds 64bit Max support - thanks to the FluCoMa project funding through the ERC
 
-#include "ext.h"			// standard Max include, always required (except in Jitter)
-#include "ext_obex.h"		// required for "new" style objects
-#include "z_dsp.h"			// required for MSP objects
+#include "ext.h"
+#include "ext_obex.h"
+#include "z_dsp.h"
+#include "buffer.h"    // this defines our buffer's data structure and other goodies
 
+#define CLIP(a, lo, hi) ( (a)>(lo)?( (a)<(hi)?(a):(hi) ):(lo) )
 
-// struct to represent the object's state
-typedef struct _ipoke {
-	t_pxobject		ob;			// the object itself (t_pxobject in MSP instead of t_object)
-	double			offset; 	// the value of a property of our object
+typedef struct _ipoke
+{
+    t_pxobject l_obj;
+    t_symbol *l_sym;
+    t_buffer *l_buf;
+    short l_chan;
+    Boolean l_interp;
+    double l_overdub;
+    long l_index_precedent;
+    long l_nb_val;
+    double l_valeur;
 } t_ipoke;
 
-
 // method prototypes
-void *ipoke_new(t_symbol *s, long argc, t_atom *argv);
-void ipoke_free(t_ipoke *x);
-void ipoke_assist(t_ipoke *x, void *b, long m, long a, char *s);
-void ipoke_float(t_ipoke *x, double f);
-void ipoke_dsp64(t_ipoke *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags);
-void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
+void *ipoke_new(t_symbol *s, long chan);
+
 void ipoke_dsp(t_ipoke *x, t_signal **sp);
+void ipoke_dsp64(t_ipoke *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags);
+
 t_int *ipoke_perform(t_int *w);
+void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long vec_size, long flags, void *userparam);
+
+void ipoke_set(t_ipoke *x, t_symbol *s);
+void ipoke_int(t_ipoke *x, long n);
+void ipoke_interp(t_ipoke *x, long n);
+void ipoke_overdub(t_ipoke *x, double n);
+void ipoke_dblclick(t_ipoke *x);
+void ipoke_assist(t_ipoke *x, void *b, long m, long a, char *s);
+
+inline long wrap_index(size_t index, size_t arrayLength);
+
+t_symbol *ps_buffer;
 
 // global class pointer variable
 static t_class *ipoke_class = NULL;
@@ -35,110 +53,1023 @@ static t_class *ipoke_class = NULL;
 
 int C74_EXPORT main()
 {
-	// object initialization, note the use of dsp_free for the freemethod, which is required
-	// unless you need to free allocated memory, in which case you should call dsp_free from
-	// your custom free function.
+	t_class *c = class_new("ipoke~", (method)ipoke_new, (method)dsp_free, (long)sizeof(t_ipoke), 0L, A_SYM, A_DEFLONG, 0);
 
-	t_class *c = class_new("ipoke~", (method)ipoke_new, (method)dsp_free, (long)sizeof(t_ipoke), 0L, A_GIMME, 0);
-
-	class_addmethod(c, (method)ipoke_float,		"float",	A_FLOAT, 0);
-    class_addmethod(c, (method)ipoke_dsp, "dsp",    A_CANT, 0);
-	class_addmethod(c, (method)ipoke_dsp64,		"dsp64",	A_CANT, 0);
-	class_addmethod(c, (method)ipoke_assist,	"assist",	A_CANT, 0);
-
-	class_dspinit(c);
-	class_register(CLASS_BOX, c);
-	ipoke_class = c;
+    class_addmethod(c, (method)ipoke_int, "int", A_LONG, 0);
+    class_addmethod(c, (method)ipoke_dsp, "dsp", A_CANT, 0);
+    class_addmethod (c, (method)ipoke_dsp64, "dsp64", A_CANT, 0L); //support max6 64 bits
+    class_addmethod(c, (method)ipoke_set, "set", A_SYM, 0);
+    class_addmethod(c, (method)ipoke_interp, "interp", A_LONG, 0);
+    class_addmethod(c, (method)ipoke_overdub, "overdub", A_FLOAT, 0);
+    class_addmethod(c, (method)ipoke_assist, "assist", A_CANT, 0);
+    class_addmethod(c, (method)ipoke_dblclick, "dblclick", A_CANT, 0);
+    
+    class_dspinit(c);
+    class_register(CLASS_BOX, c);
+    ipoke_class = c;
+    
+    ps_buffer = gensym("buffer~");
+    
+//    post("ipoke 4.1");
+    
+    return 0;
+    
 }
 
 
-void *ipoke_new(t_symbol *s, long argc, t_atom *argv)
+void *ipoke_new(t_symbol *s, long chan)
 {
 	t_ipoke *x = (t_ipoke *)object_alloc(ipoke_class);
 
 	if (x) {
-		dsp_setup((t_pxobject *)x, 1);	// MSP inlets: arg is # of inlets and is REQUIRED!
-		// use 0 if you don't need inlets
-		outlet_new(x, "signal"); 		// signal outlet (note "signal" rather than NULL)
-		x->offset = 0.0;
-	}
-	return (x);
+        dsp_setup((t_pxobject *)x, 3);          // 3 audio inlets
+        
+        x->l_sym = s;
+        x->l_interp = 1;
+        x->l_overdub = 0;
+        x->l_index_precedent = -1;
+        
+        if (chan)
+            x->l_chan = CLIP(chan,1,4) - 1;        // check the argument - initial buffer channel
+        return (x);
+    }
+    
 }
 
-
-// NOT CALLED!, we use dsp_free for a generic free function
-void ipoke_free(t_ipoke *x)
+void ipoke_set(t_ipoke *x, t_symbol *s)
 {
-	;
+    t_buffer *b;
+    
+    b = (t_buffer *)(s->s_thing);
+    
+    x->l_sym = s;
+    if ((b) && (ob_sym(b) == ps_buffer)) {
+        x->l_buf = b;
+    } else {
+        object_error((t_object *)x, "%s is not a valid buffer", s->s_name);
+        x->l_buf = 0;
+    }
 }
 
+void ipoke_int(t_ipoke *x, long n)
+{
+    if (x->l_obj.z_in == 2)
+    {
+        if (n)
+            x->l_chan = (short)(CLIP(n,1,4) - 1);
+        else
+            x->l_chan = 0;
+        x->l_index_precedent = -1;
+    }
+    else
+        object_error((t_object *)x, "buffer~ channel assignation by the rightmost inlet");
+}
+
+void ipoke_interp(t_ipoke *x, long n)
+{
+    switch (n)
+    {
+        case 0:
+            x->l_interp = 0;
+            break;
+        case 1:
+            x->l_interp = 1;
+            break;
+        default:
+            object_error((t_object *)x, "wrong interpolation type");
+            break;
+    }
+}
+
+void ipoke_overdub(t_ipoke *x, double n)
+{
+    x->l_overdub = n;
+    //    post("overdub level is %f", x->l_overdub = n);
+}
+
+void ipoke_dblclick(t_ipoke *x)
+{
+    t_buffer *b;
+    
+    b = (t_buffer *)(x->l_sym->s_thing);
+    
+    if ((b) && (ob_sym(b) == ps_buffer))
+        mess0((t_object *)b,gensym("dblclick"));
+}
 
 void ipoke_assist(t_ipoke *x, void *b, long m, long a, char *s)
 {
-	if (m == ASSIST_INLET) { //inlet
-		sprintf(s, "I am inlet %ld", a);
-	}
-	else {	// outlet
-		sprintf(s, "I am outlet %ld", a);
-	}
+    switch (a)
+    {
+        case 0:
+            sprintf(s,"(signal) Value In");
+            break;
+        case 1:
+            sprintf(s,"(signal) Sample Index");
+            break;
+        case 2:
+            sprintf(s,"(int) Audio Channel In buffer~");
+            break;
+    }
 }
 
-
-void ipoke_float(t_ipoke *x, double f)
+inline long wrap_index(size_t index, size_t arrayLength)
 {
-	x->offset = f;
+    while(index >= arrayLength)
+        index -= arrayLength;
+    return index;
 }
-
 
 // registers a function for the signal chain in Max
-void ipoke_dsp64(t_ipoke *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags)
-{
-	post("my sample rate is: %f", samplerate);
 
-	// instead of calling dsp_add(), we send the "dsp_add64" message to the object representing the dsp chain
-	// the arguments passed are:
-	// 1: the dsp64 object passed-in by the calling function
-	// 2: the symbol of the "dsp_add64" message we are sending
-	// 3: a pointer to your object
-	// 4: a pointer to your 64-bit perform method
-	// 5: flags to alter how the signal chain handles your object -- just pass 0
-	// 6: a generic pointer that you can use to pass any additional data to your perform method
-
-	object_method(dsp64, gensym("dsp_add64"), x, ipoke_perform64, 0, NULL);
-}
-
-// registers a function for the 64 bit signal chain in Max
 void ipoke_dsp(t_ipoke *x, t_signal **sp)
 {
+    ipoke_set(x,x->l_sym);
+    x->l_index_precedent = -1;
     dsp_add(ipoke_perform, 4, x, sp[0]->s_vec, sp[1]->s_vec, sp[0]->s_n);
-    post("dsp32");
+//    post("dsp32");
 }
 
-
-// this is the 64-bit perform method audio vectors
-void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam)
+void ipoke_dsp64(t_ipoke *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags)
 {
-	t_double *inL = ins[0];		// we get audio for each inlet of the object from the **ins argument
-	t_double *outL = outs[0];	// we get audio for each outlet of the object from the **outs argument
-	int n = sampleframes;
-
-	// this perform method simply copies the input to the output, offsetting the value
-	while (n--)
-		*outL++ = *inL++ + x->offset;
+    ipoke_set(x,x->l_sym);
+    x->l_index_precedent = -1;
+    object_method(dsp64, gensym("dsp_add64"), x, ipoke_perform64, 0, NULL);
+//    post("dsp64");
 }
 
 // perform 32bit
 t_int *ipoke_perform(t_int *w)
 {
-    // transfer values from the object to local variables
-    t_ipoke *x = (t_ipoke *)(w[1]);   // object pointer
-    float *entree = (float *)(w[2]);    // input pointer
-    float *sortie = (float *)(w[3]);    // output pointer
+    t_ipoke *x = (t_ipoke *)(w[1]);
+    float *inval = (float *)(w[2]);
+    float *inind = (float *)(w[3]);
     int n = (int)(w[4]);
     
-    while (n--)
-        *sortie++ = *entree++ + x->offset;
+    t_buffer *b = x->l_buf;
     
-    // you have to return the NEXT pointer in the array OR MAX WILL CRASH
-    return w + 5;
+    Boolean interp, dirty_flag;
+    short chan, nc;
+    float *tab;
+    double valeur_entree, valeur, index_tampon, coeff, overdub;
+    long frames, nb_val, index, index_precedent, pas, i,demivie;
+    
+    if (!b || x->l_obj.z_disabled)
+        goto out;
+    ATOMIC_INCREMENT(&b->b_inuse);
+    if (!b->b_valid) {
+        ATOMIC_DECREMENT(&b->b_inuse);
+        goto out;
+    }
+    
+    tab = b->b_samples;
+    chan = x->l_chan;
+    nc = b->b_nchans;
+    frames = b->b_frames;
+    demivie = (long)(frames * 0.5);
+    
+    index_precedent = x->l_index_precedent;
+    valeur = x->l_valeur;
+    nb_val = x->l_nb_val;
+    interp = x->l_interp;
+    dirty_flag = false;
+    overdub = x->l_overdub;
+    
+    if (overdub != 0.)
+    {
+        if (interp)
+        {
+            while (n--)    // dsp loop with interpolation
+            {
+                valeur_entree = *inval++;
+                index_tampon = *inind++;
+                
+                if (index_tampon < 0.0)                                            // if the writing is stopped
+                {
+                    if (index_precedent >= 0)                                    // and if it is the 1st one to be stopped
+                    {
+                        tab[index_precedent * nc + chan] = (tab[index_precedent * nc + chan] * overdub) + (valeur/nb_val);        // write the average value at the last given index
+                        valeur = 0.0;
+                        index_precedent = -1;
+                        dirty_flag = true;
+                    }
+                }
+                else
+                {
+                    index = wrap_index((long)(index_tampon + 0.5),frames);        // round the next index and make sure he is in the buffer's boundaries
+                    
+                    if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
+                    {
+                        index_precedent = index;
+                        nb_val = 0;
+                    }
+                    
+                    if (index == index_precedent)                                // if the index has not moved, accumulate the value to average later.
+                    {
+                        valeur += valeur_entree;
+                        nb_val += 1;
+                    }
+                    else                                                        // if it moves
+                    {
+                        if (nb_val != 1)                                        // is there more than one values to average
+                        {
+                            valeur = valeur/nb_val;                                // if yes, calculate the average
+                            nb_val = 1;
+                        }
+                        
+                        tab[index_precedent * nc + chan] = (tab[index_precedent * nc + chan] * overdub) + valeur;                // write the average value at the last index
+                        dirty_flag = true;
+                        
+                        pas = index - index_precedent;                            // calculate the step to do
+                        
+                        if (pas > 0)                                            // are we going up
+                        {
+                            if (pas > demivie)                                    // is it faster to go the other way round?
+                            {
+                                pas -= frames;                                    // calculate the new number of steps
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                
+                                for(i=(index_precedent-1);i>=0;i--)                    // fill the gap to zero
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                                for(i=(frames-1);i>index;i--)                        // fill the gap from the top
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                for (i=(index_precedent+1); i<index; i++)
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                            }
+                        }
+                        else                                                    // if we are going down
+                        {
+                            if ((-pas) > demivie)                                // is it faster to go the other way round?
+                            {
+                                pas += frames;                                    // calculate the new number of steps
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                
+                                for(i=(index_precedent+1);i<frames;i++)            // fill the gap to the top
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                                for(i=0;i<index;i++)                            // fill the gap from zero
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                for (i=(index_precedent-1); i>index; i--)
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                            }
+                        }
+                        
+                        valeur = valeur_entree;                                    // transfer the new previous value
+                    }
+                }
+                index_precedent = index;                                        // transfer the new previous address
+            }
+        }
+        else
+        {
+            while (n--)    // dsp loop without interpolation
+            {
+                valeur_entree = *inval++;
+                index_tampon = *inind++;
+                
+                if (index_tampon < 0.0)                                            // if the writing is stopped
+                {
+                    if (index_precedent >= 0)                                    // and if it is the 1st one to be stopped
+                    {
+                        tab[index_precedent * nc + chan] = (tab[index_precedent * nc + chan] * overdub) + (valeur/nb_val);        // write the average value at the last given index
+                        valeur = 0.0;
+                        index_precedent = -1;
+                        dirty_flag = true;
+                    }
+                }
+                else
+                {
+                    index = wrap_index((long)(index_tampon + 0.5),frames);            // round the next index and make sure he is in the buffer's boundaries
+                    
+                    if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
+                    {
+                        index_precedent = index;
+                        nb_val = 0;
+                    }
+                    
+                    if (index == index_precedent)                                // if the index has not moved, accumulate the value to average later.
+                    {
+                        valeur += valeur_entree;
+                        nb_val += 1;
+                    }
+                    else                                                        // if it moves
+                    {
+                        if (nb_val != 1)                                        // is there more than one values to average
+                        {
+                            valeur = valeur/nb_val;                                // if yes, calculate the average
+                            nb_val = 1;
+                        }
+                        
+                        tab[index_precedent * nc + chan] = (tab[index_precedent * nc + chan] * overdub) + valeur;                // write the average value at the last index
+                        dirty_flag = true;
+                        
+                        pas = index - index_precedent;                            // calculate the step to do
+                        
+                        if (pas > 0)                                            // are we going up
+                        {
+                            if (pas > demivie)                                    // is it faster to go the other way round?
+                            {
+                                for(i=(index_precedent-1);i>=0;i--)                // fill the gap to zero
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                for(i=(frames-1);i>index;i--)                    // fill the gap from the top
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                for (i=(index_precedent+1); i<index; i++)
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                            }
+                        }
+                        else                                                    // if we are going down
+                        {
+                            if ((-pas) > demivie)                                // is it faster to go the other way round?
+                            {
+                                for(i=(index_precedent+1);i<frames;i++)            // fill the gap to the top
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                for(i=0;i<index;i++)                            // fill the gap from zero
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                for (i=(index_precedent-1); i>index; i--)
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                            }
+                        }
+                        
+                        valeur = valeur_entree;                                    // transfer the new previous value
+                    }
+                }
+                index_precedent = index;                                        // transfer the new previous address
+            }
+        }
+    }
+    else
+    {
+        if (interp)
+        {
+            while (n--)    // dsp loop with interpolation
+            {
+                valeur_entree = *inval++;
+                index_tampon = *inind++;
+                
+                if (index_tampon < 0.0)                                            // if the writing is stopped
+                {
+                    if (index_precedent >= 0)                                    // and if it is the 1st one to be stopped
+                    {
+                        tab[index_precedent * nc + chan] = valeur/nb_val;        // write the average value at the last given index
+                        valeur = 0.0;
+                        index_precedent = -1;
+                        dirty_flag = true;
+                    }
+                }
+                else
+                {
+                    index = wrap_index((long)(index_tampon + 0.5),frames);        // round the next index and make sure he is in the buffer's boundaries
+                    
+                    if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
+                    {
+                        index_precedent = index;
+                        nb_val = 0;
+                    }
+                    
+                    if (index == index_precedent)                                // if the index has not moved, accumulate the value to average later.
+                    {
+                        valeur += valeur_entree;
+                        nb_val += 1;
+                    }
+                    else                                                        // if it moves
+                    {
+                        if (nb_val != 1)                                        // is there more than one values to average
+                        {
+                            valeur = valeur/nb_val;                                // if yes, calculate the average
+                            nb_val = 1;
+                        }
+                        
+                        tab[index_precedent * nc + chan] = valeur;                // write the average value at the last index
+                        dirty_flag = true;
+                        
+                        pas = index - index_precedent;                            // calculate the step to do
+                        
+                        if (pas > 0)                                            // are we going up
+                        {
+                            if (pas > demivie)                                    // is it faster to go the other way round?
+                            {
+                                pas -= frames;                                    // calculate the new number of steps
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                
+                                for(i=(index_precedent-1);i>=0;i--)                    // fill the gap to zero
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                                for(i=(frames-1);i>index;i--)                        // fill the gap from the top
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                for (i=(index_precedent+1); i<index; i++)
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                            }
+                        }
+                        else                                                    // if we are going down
+                        {
+                            if ((-pas) > demivie)                                // is it faster to go the other way round?
+                            {
+                                pas += frames;                                    // calculate the new number of steps
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                
+                                for(i=(index_precedent+1);i<frames;i++)            // fill the gap to the top
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                                for(i=0;i<index;i++)                            // fill the gap from zero
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                for (i=(index_precedent-1); i>index; i--)
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                            }
+                        }
+                        
+                        valeur = valeur_entree;                                    // transfer the new previous value
+                    }
+                }
+                index_precedent = index;                                        // transfer the new previous address
+            }
+        }
+        else
+        {
+            while (n--)    // dsp loop without interpolation
+            {
+                valeur_entree = *inval++;
+                index_tampon = *inind++;
+                
+                if (index_tampon < 0.0)                                            // if the writing is stopped
+                {
+                    if (index_precedent >= 0)                                    // and if it is the 1st one to be stopped
+                    {
+                        tab[index_precedent * nc + chan] = valeur/nb_val;        // write the average value at the last given index
+                        valeur = 0.0;
+                        index_precedent = -1;
+                        dirty_flag = true;
+                    }
+                }
+                else
+                {
+                    index = wrap_index((long)(index_tampon + 0.5),frames);            // round the next index and make sure he is in the buffer's boundaries
+                    
+                    if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
+                    {
+                        index_precedent = index;
+                        nb_val = 0;
+                    }
+                    
+                    if (index == index_precedent)                                // if the index has not moved, accumulate the value to average later.
+                    {
+                        valeur += valeur_entree;
+                        nb_val += 1;
+                    }
+                    else                                                        // if it moves
+                    {
+                        if (nb_val != 1)                                        // is there more than one values to average
+                        {
+                            valeur = valeur/nb_val;                                // if yes, calculate the average
+                            nb_val = 1;
+                        }
+                        
+                        tab[index_precedent * nc + chan] = valeur;                // write the average value at the last index
+                        dirty_flag = true;
+                        
+                        pas = index - index_precedent;                            // calculate the step to do
+                        
+                        if (pas > 0)                                            // are we going up
+                        {
+                            if (pas > demivie)                                    // is it faster to go the other way round?
+                            {
+                                for(i=(index_precedent-1);i>=0;i--)                // fill the gap to zero
+                                    tab[i * nc + chan] = valeur;
+                                for(i=(frames-1);i>index;i--)                    // fill the gap from the top
+                                    tab[i * nc + chan] = valeur;
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                for (i=(index_precedent+1); i<index; i++)
+                                    tab[i * nc + chan] = valeur;
+                            }
+                        }
+                        else                                                    // if we are going down
+                        {
+                            if ((-pas) > demivie)                                // is it faster to go the other way round?
+                            {
+                                for(i=(index_precedent+1);i<frames;i++)            // fill the gap to the top
+                                    tab[i * nc + chan] = valeur;
+                                for(i=0;i<index;i++)                            // fill the gap from zero
+                                    tab[i * nc + chan] = valeur;
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                for (i=(index_precedent-1); i>index; i--)
+                                    tab[i * nc + chan] = valeur;
+                            }
+                        }
+                        
+                        valeur = valeur_entree;                                    // transfer the new previous value
+                    }
+                }
+                index_precedent = index;                                        // transfer the new previous address
+            }
+        }
+    }
+    //update the mod time
+    if (dirty_flag)
+        object_method((t_object *)b, gensym("dirty"));
+    
+    //mark the buffers as free
+    ATOMIC_DECREMENT(&b->b_inuse);
+    
+    x->l_index_precedent = index_precedent;
+    x->l_valeur = valeur;
+    x->l_nb_val = nb_val;
+    
+out:
+    return (w + 5);
+}
+
+void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long vec_size, long flags, void *userparam)
+{
+    //this is the only different code to above//
+    double *inval = ins[0];
+    double *inind = ins[1];
+    long n = vec_size;
+    //below is the same
+    
+    t_buffer *b = x->l_buf;
+    
+    Boolean interp, dirty_flag;
+    short chan, nc;
+    float *tab;
+    double valeur_entree, valeur, index_tampon, coeff, overdub;
+    long frames, nb_val, index, index_precedent, pas, i,demivie;
+    
+    if (!b || x->l_obj.z_disabled)
+        goto out;
+    ATOMIC_INCREMENT(&b->b_inuse);
+    if (!b->b_valid) {
+        ATOMIC_DECREMENT(&b->b_inuse);
+        goto out;
+    }
+    
+    tab = b->b_samples;
+    chan = x->l_chan;
+    nc = b->b_nchans;
+    frames = b->b_frames;
+    demivie = (long)(frames * 0.5);
+    
+    index_precedent = x->l_index_precedent;
+    valeur = x->l_valeur;
+    nb_val = x->l_nb_val;
+    interp = x->l_interp;
+    dirty_flag = false;
+    overdub = x->l_overdub;
+    
+    if (overdub != 0.)
+    {
+        if (interp)
+        {
+            while (n--)    // dsp loop with interpolation
+            {
+                valeur_entree = *inval++;
+                index_tampon = *inind++;
+                
+                if (index_tampon < 0.0)                                            // if the writing is stopped
+                {
+                    if (index_precedent >= 0)                                    // and if it is the 1st one to be stopped
+                    {
+                        tab[index_precedent * nc + chan] = (tab[index_precedent * nc + chan] * overdub) + (valeur/nb_val);        // write the average value at the last given index
+                        valeur = 0.0;
+                        index_precedent = -1;
+                        dirty_flag = true;
+                    }
+                }
+                else
+                {
+                    index = wrap_index((long)(index_tampon + 0.5),frames);        // round the next index and make sure he is in the buffer's boundaries
+                    
+                    if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
+                    {
+                        index_precedent = index;
+                        nb_val = 0;
+                    }
+                    
+                    if (index == index_precedent)                                // if the index has not moved, accumulate the value to average later.
+                    {
+                        valeur += valeur_entree;
+                        nb_val += 1;
+                    }
+                    else                                                        // if it moves
+                    {
+                        if (nb_val != 1)                                        // is there more than one values to average
+                        {
+                            valeur = valeur/nb_val;                                // if yes, calculate the average
+                            nb_val = 1;
+                        }
+                        
+                        tab[index_precedent * nc + chan] = (tab[index_precedent * nc + chan] * overdub) + valeur;                // write the average value at the last index
+                        dirty_flag = true;
+                        
+                        pas = index - index_precedent;                            // calculate the step to do
+                        
+                        if (pas > 0)                                            // are we going up
+                        {
+                            if (pas > demivie)                                    // is it faster to go the other way round?
+                            {
+                                pas -= frames;                                    // calculate the new number of steps
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                
+                                for(i=(index_precedent-1);i>=0;i--)                    // fill the gap to zero
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                                for(i=(frames-1);i>index;i--)                        // fill the gap from the top
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                for (i=(index_precedent+1); i<index; i++)
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                            }
+                        }
+                        else                                                    // if we are going down
+                        {
+                            if ((-pas) > demivie)                                // is it faster to go the other way round?
+                            {
+                                pas += frames;                                    // calculate the new number of steps
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                
+                                for(i=(index_precedent+1);i<frames;i++)            // fill the gap to the top
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                                for(i=0;i<index;i++)                            // fill the gap from zero
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                for (i=(index_precedent-1); i>index; i--)
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                }
+                            }
+                        }
+                        
+                        valeur = valeur_entree;                                    // transfer the new previous value
+                    }
+                }
+                index_precedent = index;                                        // transfer the new previous address
+            }
+        }
+        else
+        {
+            while (n--)    // dsp loop without interpolation
+            {
+                valeur_entree = *inval++;
+                index_tampon = *inind++;
+                
+                if (index_tampon < 0.0)                                            // if the writing is stopped
+                {
+                    if (index_precedent >= 0)                                    // and if it is the 1st one to be stopped
+                    {
+                        tab[index_precedent * nc + chan] = (tab[index_precedent * nc + chan] * overdub) + (valeur/nb_val);        // write the average value at the last given index
+                        valeur = 0.0;
+                        index_precedent = -1;
+                        dirty_flag = true;
+                    }
+                }
+                else
+                {
+                    index = wrap_index((long)(index_tampon + 0.5),frames);            // round the next index and make sure he is in the buffer's boundaries
+                    
+                    if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
+                    {
+                        index_precedent = index;
+                        nb_val = 0;
+                    }
+                    
+                    if (index == index_precedent)                                // if the index has not moved, accumulate the value to average later.
+                    {
+                        valeur += valeur_entree;
+                        nb_val += 1;
+                    }
+                    else                                                        // if it moves
+                    {
+                        if (nb_val != 1)                                        // is there more than one values to average
+                        {
+                            valeur = valeur/nb_val;                                // if yes, calculate the average
+                            nb_val = 1;
+                        }
+                        
+                        tab[index_precedent * nc + chan] = (tab[index_precedent * nc + chan] * overdub) + valeur;                // write the average value at the last index
+                        dirty_flag = true;
+                        
+                        pas = index - index_precedent;                            // calculate the step to do
+                        
+                        if (pas > 0)                                            // are we going up
+                        {
+                            if (pas > demivie)                                    // is it faster to go the other way round?
+                            {
+                                for(i=(index_precedent-1);i>=0;i--)                // fill the gap to zero
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                for(i=(frames-1);i>index;i--)                    // fill the gap from the top
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                for (i=(index_precedent+1); i<index; i++)
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                            }
+                        }
+                        else                                                    // if we are going down
+                        {
+                            if ((-pas) > demivie)                                // is it faster to go the other way round?
+                            {
+                                for(i=(index_precedent+1);i<frames;i++)            // fill the gap to the top
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                                for(i=0;i<index;i++)                            // fill the gap from zero
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                for (i=(index_precedent-1); i>index; i--)
+                                    tab[i * nc + chan] = (tab[i * nc + chan] * overdub) + valeur;
+                            }
+                        }
+                        
+                        valeur = valeur_entree;                                    // transfer the new previous value
+                    }
+                }
+                index_precedent = index;                                        // transfer the new previous address
+            }
+        }
+    }
+    else
+    {
+        if (interp)
+        {
+            while (n--)    // dsp loop with interpolation
+            {
+                valeur_entree = *inval++;
+                index_tampon = *inind++;
+                
+                if (index_tampon < 0.0)                                            // if the writing is stopped
+                {
+                    if (index_precedent >= 0)                                    // and if it is the 1st one to be stopped
+                    {
+                        tab[index_precedent * nc + chan] = valeur/nb_val;        // write the average value at the last given index
+                        valeur = 0.0;
+                        index_precedent = -1;
+                        dirty_flag = true;
+                    }
+                }
+                else
+                {
+                    index = wrap_index((long)(index_tampon + 0.5),frames);        // round the next index and make sure he is in the buffer's boundaries
+                    
+                    if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
+                    {
+                        index_precedent = index;
+                        nb_val = 0;
+                    }
+                    
+                    if (index == index_precedent)                                // if the index has not moved, accumulate the value to average later.
+                    {
+                        valeur += valeur_entree;
+                        nb_val += 1;
+                    }
+                    else                                                        // if it moves
+                    {
+                        if (nb_val != 1)                                        // is there more than one values to average
+                        {
+                            valeur = valeur/nb_val;                                // if yes, calculate the average
+                            nb_val = 1;
+                        }
+                        
+                        tab[index_precedent * nc + chan] = valeur;                // write the average value at the last index
+                        dirty_flag = true;
+                        
+                        pas = index - index_precedent;                            // calculate the step to do
+                        
+                        if (pas > 0)                                            // are we going up
+                        {
+                            if (pas > demivie)                                    // is it faster to go the other way round?
+                            {
+                                pas -= frames;                                    // calculate the new number of steps
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                
+                                for(i=(index_precedent-1);i>=0;i--)                    // fill the gap to zero
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                                for(i=(frames-1);i>index;i--)                        // fill the gap from the top
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                for (i=(index_precedent+1); i<index; i++)
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                            }
+                        }
+                        else                                                    // if we are going down
+                        {
+                            if ((-pas) > demivie)                                // is it faster to go the other way round?
+                            {
+                                pas += frames;                                    // calculate the new number of steps
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                
+                                for(i=(index_precedent+1);i<frames;i++)            // fill the gap to the top
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                                for(i=0;i<index;i++)                            // fill the gap from zero
+                                {
+                                    valeur += coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                coeff = (valeur_entree - valeur) / pas;            // calculate the interpolation coefficient
+                                for (i=(index_precedent-1); i>index; i--)
+                                {
+                                    valeur -= coeff;
+                                    tab[i * nc + chan] = valeur;
+                                }
+                            }
+                        }
+                        
+                        valeur = valeur_entree;                                    // transfer the new previous value
+                    }
+                }
+                index_precedent = index;                                        // transfer the new previous address
+            }
+        }
+        else
+        {
+            while (n--)    // dsp loop without interpolation
+            {
+                valeur_entree = *inval++;
+                index_tampon = *inind++;
+                
+                if (index_tampon < 0.0)                                            // if the writing is stopped
+                {
+                    if (index_precedent >= 0)                                    // and if it is the 1st one to be stopped
+                    {
+                        tab[index_precedent * nc + chan] = valeur/nb_val;        // write the average value at the last given index
+                        valeur = 0.0;
+                        index_precedent = -1;
+                        dirty_flag = true;
+                    }
+                }
+                else
+                {
+                    index = wrap_index((long)(index_tampon + 0.5),frames);            // round the next index and make sure he is in the buffer's boundaries
+                    
+                    if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
+                    {
+                        index_precedent = index;
+                        nb_val = 0;
+                    }
+                    
+                    if (index == index_precedent)                                // if the index has not moved, accumulate the value to average later.
+                    {
+                        valeur += valeur_entree;
+                        nb_val += 1;
+                    }
+                    else                                                        // if it moves
+                    {
+                        if (nb_val != 1)                                        // is there more than one values to average
+                        {
+                            valeur = valeur/nb_val;                                // if yes, calculate the average
+                            nb_val = 1;
+                        }
+                        
+                        tab[index_precedent * nc + chan] = valeur;                // write the average value at the last index
+                        dirty_flag = true;
+                        
+                        pas = index - index_precedent;                            // calculate the step to do
+                        
+                        if (pas > 0)                                            // are we going up
+                        {
+                            if (pas > demivie)                                    // is it faster to go the other way round?
+                            {
+                                for(i=(index_precedent-1);i>=0;i--)                // fill the gap to zero
+                                    tab[i * nc + chan] = valeur;
+                                for(i=(frames-1);i>index;i--)                    // fill the gap from the top
+                                    tab[i * nc + chan] = valeur;
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                for (i=(index_precedent+1); i<index; i++)
+                                    tab[i * nc + chan] = valeur;
+                            }
+                        }
+                        else                                                    // if we are going down
+                        {
+                            if ((-pas) > demivie)                                // is it faster to go the other way round?
+                            {
+                                for(i=(index_precedent+1);i<frames;i++)            // fill the gap to the top
+                                    tab[i * nc + chan] = valeur;
+                                for(i=0;i<index;i++)                            // fill the gap from zero
+                                    tab[i * nc + chan] = valeur;
+                            }
+                            else                                                // if not, just fill the gaps
+                            {
+                                for (i=(index_precedent-1); i>index; i--)
+                                    tab[i * nc + chan] = valeur;
+                            }
+                        }
+                        
+                        valeur = valeur_entree;                                    // transfer the new previous value
+                    }
+                }
+                index_precedent = index;                                        // transfer the new previous address
+            }
+        }
+    }
+    //update the mod time
+    if (dirty_flag)
+        object_method((t_object *)b, gensym("dirty"));
+    
+    //mark the buffers as free
+    ATOMIC_DECREMENT(&b->b_inuse);
+    
+    x->l_index_precedent = index_precedent;
+    x->l_valeur = valeur;
+    x->l_nb_val = nb_val;
+    
+out:
+    return;
 }
