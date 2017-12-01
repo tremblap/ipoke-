@@ -1,0 +1,53 @@
+# edited from tutorial plus online resources plus ofBook
+
+###########################
+# ignore generated binaries
+# but not the data folder
+###########################
+
+#########
+# general
+#########
+
+[Bb]uild/
+[Oo]bj/
+*.o
+[Dd]ebug*/
+[Rr]elease*/
+*.mode*
+*.app/
+*.pyc
+.svn/
+*.log
+
+
+########################
+# IDE files which should
+# be ignored
+########################
+
+# XCode
+*.pbxuser
+!default.pbxuser
+*.perspective
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+# XCode 4
+*.xccheckout
+xcuserdata/
+
+
+##################
+# operating system
+##################
+
+# OSX
+.DS_Store
+*.swp
+*~.nib
+# Thumbnails
+._*
