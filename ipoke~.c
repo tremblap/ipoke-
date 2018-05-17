@@ -3,7 +3,8 @@
 //    v.2 optimised at the University of Huddersfield, with the help of the dev@cycling74.com comments of Mark Pauley, Alex Harker, Ben Neville and Peter Castine, addressed  to me or to others.
 //    v.3 updated for Max5
 //    v.4 added overdub ratio and Max6 support
-//    v.4.1 adds 64bit Max support - thanks to the FluCoMa project funding through the ERC
+//    v.4.1 adds 64bit Max support - thanks to the FluCoMa project funded by the European Research Council (ERC) under the European Union’s Horizon 2020 research and innovation programme (grant agreement No 725899)
+//    v.4.1.1 corrected the behaviour when starting to write after negative indices
 
 #include "ext.h"
 #include "ext_obex.h"
@@ -17,8 +18,8 @@ typedef struct _ipoke
     t_pxobject l_obj;
     t_symbol *l_sym;
     t_buffer *l_buf;
-    short l_chan;
-    Boolean l_interp;
+    uint8_t l_chan;
+    bool l_interp;
     double l_overdub;
     long l_index_precedent;
     long l_nb_val;
@@ -70,8 +71,6 @@ int C74_EXPORT main()
     
     ps_buffer = gensym("buffer~");
     
-//    post("ipoke 4.1");
-    
     return 0;
     
 }
@@ -116,7 +115,7 @@ void ipoke_int(t_ipoke *x, long n)
     if (x->l_obj.z_in == 2)
     {
         if (n)
-            x->l_chan = (short)(CLIP(n,1,4) - 1);
+            x->l_chan = (uint8_t)(CLIP(n,1,4) - 1);
         else
             x->l_chan = 0;
         x->l_index_precedent = -1;
@@ -187,7 +186,6 @@ void ipoke_dsp(t_ipoke *x, t_signal **sp)
     ipoke_set(x,x->l_sym);
     x->l_index_precedent = -1;
     dsp_add(ipoke_perform, 4, x, sp[0]->s_vec, sp[1]->s_vec, sp[0]->s_n);
-//    post("dsp32");
 }
 
 void ipoke_dsp64(t_ipoke *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags)
@@ -195,7 +193,6 @@ void ipoke_dsp64(t_ipoke *x, t_object *dsp64, short *count, double samplerate, l
     ipoke_set(x,x->l_sym);
     x->l_index_precedent = -1;
     object_method(dsp64, gensym("dsp_add64"), x, ipoke_perform64, 0, NULL);
-//    post("dsp64");
 }
 
 // perform 32bit
@@ -208,8 +205,8 @@ t_int *ipoke_perform(t_int *w)
     
     t_buffer *b = x->l_buf;
     
-    Boolean interp, dirty_flag;
-    short chan, nc;
+    bool interp, dirty_flag;
+    uint8_t chan, nc;
     float *tab;
     double valeur_entree, valeur, index_tampon, coeff, overdub;
     long frames, nb_val, index, index_precedent, pas, i,demivie;
@@ -341,8 +338,8 @@ t_int *ipoke_perform(t_int *w)
                         
                         valeur = valeur_entree;                                    // transfer the new previous value
                     }
+                    index_precedent = index;                                        // transfer the new previous address
                 }
-                index_precedent = index;                                        // transfer the new previous address
             }
         }
         else
@@ -423,8 +420,8 @@ t_int *ipoke_perform(t_int *w)
                         
                         valeur = valeur_entree;                                    // transfer the new previous value
                     }
+                    index_precedent = index;                                        // transfer the new previous address
                 }
-                index_precedent = index;                                        // transfer the new previous address
             }
         }
     }
@@ -534,8 +531,8 @@ t_int *ipoke_perform(t_int *w)
                         
                         valeur = valeur_entree;                                    // transfer the new previous value
                     }
+                    index_precedent = index;                                        // transfer the new previous address
                 }
-                index_precedent = index;                                        // transfer the new previous address
             }
         }
         else
@@ -616,8 +613,8 @@ t_int *ipoke_perform(t_int *w)
                         
                         valeur = valeur_entree;                                    // transfer the new previous value
                     }
+                    index_precedent = index;                                        // transfer the new previous address
                 }
-                index_precedent = index;                                        // transfer the new previous address
             }
         }
     }
@@ -646,8 +643,8 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
     
     t_buffer *b = x->l_buf;
     
-    Boolean interp, dirty_flag;
-    short chan, nc;
+    bool interp, dirty_flag;
+    uint8_t chan, nc;
     float *tab;
     double valeur_entree, valeur, index_tampon, coeff, overdub;
     long frames, nb_val, index, index_precedent, pas, i,demivie;
@@ -779,8 +776,8 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
                         
                         valeur = valeur_entree;                                    // transfer the new previous value
                     }
+                    index_precedent = index;                                        // transfer the new previous address
                 }
-                index_precedent = index;                                        // transfer the new previous address
             }
         }
         else
@@ -861,8 +858,8 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
                         
                         valeur = valeur_entree;                                    // transfer the new previous value
                     }
+                    index_precedent = index;                                        // transfer the new previous address
                 }
-                index_precedent = index;                                        // transfer the new previous address
             }
         }
     }
@@ -972,8 +969,8 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
                         
                         valeur = valeur_entree;                                    // transfer the new previous value
                     }
+                    index_precedent = index;                                        // transfer the new previous address
                 }
-                index_precedent = index;                                        // transfer the new previous address
             }
         }
         else
@@ -1054,8 +1051,8 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
                         
                         valeur = valeur_entree;                                    // transfer the new previous value
                     }
+                    index_precedent = index;                                        // transfer the new previous address
                 }
-                index_precedent = index;                                        // transfer the new previous address
             }
         }
     }
