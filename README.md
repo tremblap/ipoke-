@@ -7,7 +7,7 @@ v.4.1.1 corrected the behaviour when starting to write after negative indices
 #### Description
 This is an interpolating version of the staple Max object poke~, which allows to write to the buffers without leaving unfilled indices when writing faster than realtime.
 
-This port was made possible thanks to the FluCoMa project (http://www.flucoma.org/) funded by the European Research Council (https://erc.europa.eu/) under the European Union’s Horizon 2020 research and innovation programme (grant agreement No 725899)
+The maintenance, update, and 64 bit port were made possible thanks to the FluCoMa project (http://www.flucoma.org/) funded by the European Research Council (https://erc.europa.eu/) under the European Union’s Horizon 2020 research and innovation programme (grant agreement No 725899)
 
 #### Why was this utility needed
 It was impossible to emulate the musical behaviour of bespoke resampling digital delay pedals in Max. Now it is.
@@ -19,6 +19,6 @@ Download the package and read the text file.
 On MacOS, the XCode project should build (tested on XCode 9.2)
 On Windows, the Visual Studio 2017 project should build.
 
-On either, do not forget to build for release, as optimisation is crutial.
+On either, do not forget to build for release, as optimisation is crucial.
 
 #### Enjoy! Comments, suggestions and bug reports are welcome.
