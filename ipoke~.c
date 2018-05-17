@@ -18,7 +18,7 @@ typedef struct _ipoke
     t_pxobject l_obj;
     t_symbol *l_sym;
     t_buffer *l_buf;
-    uint8_t l_chan;
+    char l_chan;
     bool l_interp;
     double l_overdub;
     long l_index_precedent;
@@ -115,7 +115,7 @@ void ipoke_int(t_ipoke *x, long n)
     if (x->l_obj.z_in == 2)
     {
         if (n)
-            x->l_chan = (uint8_t)(CLIP(n,1,4) - 1);
+            x->l_chan = (char)(CLIP(n,1,4) - 1);
         else
             x->l_chan = 0;
         x->l_index_precedent = -1;
@@ -206,7 +206,7 @@ t_int *ipoke_perform(t_int *w)
     t_buffer *b = x->l_buf;
     
     bool interp, dirty_flag;
-    uint8_t chan, nc;
+    char chan, nc;
     float *tab;
     double valeur_entree, valeur, index_tampon, coeff, overdub;
     long frames, nb_val, index, index_precedent, pas, i,demivie;
@@ -644,7 +644,7 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
     t_buffer *b = x->l_buf;
     
     bool interp, dirty_flag;
-    uint8_t chan, nc;
+    char chan, nc;
     float *tab;
     double valeur_entree, valeur, index_tampon, coeff, overdub;
     long frames, nb_val, index, index_precedent, pas, i,demivie;
