@@ -253,7 +253,7 @@ t_int *ipoke_perform(t_int *w)
                 }
                 else
                 {
-                    index = wrap_index((long)(index_tampon + 0.5),frames);        // round the next index and make sure he is in the buffer's boundaries
+                    index = wrap_index((long)(index_tampon),frames);        // truncate the next index and make sure it is in the buffer's boundaries
                     
                     if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
                     {
@@ -361,7 +361,7 @@ t_int *ipoke_perform(t_int *w)
                 }
                 else
                 {
-                    index = wrap_index((long)(index_tampon + 0.5),frames);            // round the next index and make sure he is in the buffer's boundaries
+                    index = wrap_index((long)(index_tampon),frames);        // truncate the next index and make sure it is in the buffer's boundaries
                     
                     if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
                     {
@@ -446,7 +446,7 @@ t_int *ipoke_perform(t_int *w)
                 }
                 else
                 {
-                    index = wrap_index((long)(index_tampon + 0.5),frames);        // round the next index and make sure he is in the buffer's boundaries
+                    index = wrap_index((long)(index_tampon),frames);        // truncate the next index and make sure it is in the buffer's boundaries
                     
                     if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
                     {
@@ -554,7 +554,7 @@ t_int *ipoke_perform(t_int *w)
                 }
                 else
                 {
-                    index = wrap_index((long)(index_tampon + 0.5),frames);            // round the next index and make sure he is in the buffer's boundaries
+                    index = wrap_index((long)(index_tampon),frames);        // truncate the next index and make sure it is in the buffer's boundaries
                     
                     if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
                     {
@@ -691,7 +691,7 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
                 }
                 else
                 {
-                    index = wrap_index((long)(index_tampon + 0.5),frames);        // round the next index and make sure he is in the buffer's boundaries
+                    index = wrap_index((long)(index_tampon),frames);        // truncate the next index and make sure it is in the buffer's boundaries
                     
                     if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
                     {
@@ -799,7 +799,7 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
                 }
                 else
                 {
-                    index = wrap_index((long)(index_tampon + 0.5),frames);            // round the next index and make sure he is in the buffer's boundaries
+                    index = wrap_index((long)(index_tampon),frames);        // truncate the next index and make sure it is in the buffer's boundaries
                     
                     if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
                     {
@@ -884,7 +884,7 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
                 }
                 else
                 {
-                    index = wrap_index((long)(index_tampon + 0.5),frames);        // round the next index and make sure he is in the buffer's boundaries
+                    index = wrap_index((long)(index_tampon),frames);        // truncate the next index and make sure it is in the buffer's boundaries
                     
                     if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
                     {
@@ -992,7 +992,7 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
                 }
                 else
                 {
-                    index = wrap_index((long)(index_tampon + 0.5),frames);            // round the next index and make sure he is in the buffer's boundaries
+                    index = wrap_index((long)(index_tampon),frames);        // truncate the next index and make sure it is in the buffer's boundaries
                     
                     if (index_precedent < 0)                                    // if it is the first index to write, resets the averaging and the values
                     {
