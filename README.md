@@ -19,9 +19,9 @@ Download the package and read the text file.
 On MacOS, the XCode project should build (tested on XCode 9.2)
 
 On Windows:
-  1. install the 'max-sdk-master' in your Max7 package folder. (tested with SDK dated 6 Dec 2017)
+  1. install the 'max-sdk-master' in your Max7 package folder. (tested with SDK Version 7.3.3)
   2. put the 'ipoke~' folder in the 'max-sdk-master/source/audio'
-  3. double-click on the project. It should compile (tested with VS 2017 v.141)
+  3. double-click on the project. It should compile (tested with VS 2017 Community 15.7.1)
 
 On either, do not forget to build for release, as optimisation is crucial.
 
