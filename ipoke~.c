@@ -9,7 +9,7 @@
 #include "ext.h"
 #include "ext_obex.h"
 #include "z_dsp.h"
-#include "buffer.h"    // this defines our buffer's data structure and other goodies
+#include "ext_buffer.h"    // this defines our buffer's data structure and other goodies
 
 #define CLIP(a, lo, hi) ( (a)>(lo)?( (a)<(hi)?(a):(hi) ):(lo) )
 
@@ -17,7 +17,7 @@ typedef struct _ipoke
 {
     t_pxobject l_obj;
     t_symbol *l_sym;
-    t_buffer *l_buf;
+    t_buffer_ref *l_buf;
     char l_chan;
     bool l_interp;
     double l_overdub;
@@ -44,15 +44,13 @@ void ipoke_assist(t_ipoke *x, void *b, long m, long a, char *s);
 
 inline long wrap_index(size_t index, size_t arrayLength);
 
-t_symbol *ps_buffer;
-
 // global class pointer variable
 static t_class *ipoke_class = NULL;
 
 
 //***********************************************************************************************
 
-int C74_EXPORT main()
+C74_EXPORT void ext_main(void *r)
 {
 	t_class *c = class_new("ipoke~", (method)ipoke_new, (method)dsp_free, (long)sizeof(t_ipoke), 0L, A_SYM, A_DEFLONG, 0);
 
@@ -67,12 +65,7 @@ int C74_EXPORT main()
     
     class_dspinit(c);
     class_register(CLASS_BOX, c);
-    ipoke_class = c;
-    
-    ps_buffer = gensym("buffer~");
-    
-    return 0;
-    
+    ipoke_class = c;    
 }
 
 
@@ -96,18 +89,11 @@ void *ipoke_new(t_symbol *s, long chan)
 }
 
 void ipoke_set(t_ipoke *x, t_symbol *s)
-{
-    t_buffer *b;
-    
-    b = (t_buffer *)(s->s_thing);
-    
-    x->l_sym = s;
-    if ((b) && (ob_sym(b) == ps_buffer)) {
-        x->l_buf = b;
-    } else {
-        object_error((t_object *)x, "%s is not a valid buffer", s->s_name);
-        x->l_buf = 0;
-    }
+{    
+    if (!x->l_buf)
+		x->l_buf = buffer_ref_new((t_object *)x, s);
+	else
+		buffer_ref_set(x->l_buf, s);
 }
 
 void ipoke_int(t_ipoke *x, long n)
@@ -148,12 +134,7 @@ void ipoke_overdub(t_ipoke *x, double n)
 
 void ipoke_dblclick(t_ipoke *x)
 {
-    t_buffer *b;
-    
-    b = (t_buffer *)(x->l_sym->s_thing);
-    
-    if ((b) && (ob_sym(b) == ps_buffer))
-        mess0((t_object *)b,gensym("dblclick"));
+	buffer_view(buffer_ref_getobject(x->l_buf));
 }
 
 void ipoke_assist(t_ipoke *x, void *b, long m, long a, char *s)
@@ -172,7 +153,7 @@ void ipoke_assist(t_ipoke *x, void *b, long m, long a, char *s)
     }
 }
 
-inline long wrap_index(size_t index, size_t arrayLength)
+long wrap_index(size_t index, size_t arrayLength)
 {
     while(index >= arrayLength)
         index -= arrayLength;
@@ -203,7 +184,7 @@ t_int *ipoke_perform(t_int *w)
     float *inind = (float *)(w[3]);
     int n = (int)(w[4]);
     
-    t_buffer *b = x->l_buf;
+    t_buffer_obj *b = buffer_ref_getobject(x->l_buf);
     
     bool interp, dirty_flag;
     char chan, nc;
@@ -211,18 +192,13 @@ t_int *ipoke_perform(t_int *w)
     double valeur_entree, valeur, index_tampon, coeff, overdub;
     long frames, nb_val, index, index_precedent, pas, i,demivie;
     
-    if (!b || x->l_obj.z_disabled)
-        goto out;
-    ATOMIC_INCREMENT(&b->b_inuse);
-    if (!b->b_valid) {
-        ATOMIC_DECREMENT(&b->b_inuse);
-        goto out;
-    }
+	tab = buffer_locksamples(b);
+	if (!tab)
+		goto out;
     
-    tab = b->b_samples;
-    chan = x->l_chan;
-    nc = b->b_nchans;
-    frames = b->b_frames;
+    nc = buffer_getchannelcount(b);
+    chan =  MIN(x->l_chan, nc);
+    frames = buffer_getframecount(b);
     demivie = (long)(frames * 0.5);
     
     index_precedent = x->l_index_precedent;
@@ -623,7 +599,7 @@ t_int *ipoke_perform(t_int *w)
         object_method((t_object *)b, gensym("dirty"));
     
     //mark the buffers as free
-    ATOMIC_DECREMENT(&b->b_inuse);
+	buffer_unlocksamples(b);
     
     x->l_index_precedent = index_precedent;
     x->l_valeur = valeur;
@@ -641,7 +617,7 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
     long n = vec_size;
     //below is the same
     
-    t_buffer *b = x->l_buf;
+    t_buffer_obj *b = buffer_ref_getobject(x->l_buf);
     
     bool interp, dirty_flag;
     char chan, nc;
@@ -649,18 +625,13 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
     double valeur_entree, valeur, index_tampon, coeff, overdub;
     long frames, nb_val, index, index_precedent, pas, i,demivie;
     
-    if (!b || x->l_obj.z_disabled)
-        goto out;
-    ATOMIC_INCREMENT(&b->b_inuse);
-    if (!b->b_valid) {
-        ATOMIC_DECREMENT(&b->b_inuse);
-        goto out;
-    }
+	tab = buffer_locksamples(b);
+	if (!tab)
+		goto out;
     
-    tab = b->b_samples;
-    chan = x->l_chan;
-    nc = b->b_nchans;
-    frames = b->b_frames;
+    nc = buffer_getchannelcount(b);
+    chan =  MIN(x->l_chan, nc);
+    frames = buffer_getframecount(b);
     demivie = (long)(frames * 0.5);
     
     index_precedent = x->l_index_precedent;
@@ -1061,7 +1032,7 @@ void ipoke_perform64(t_ipoke *x, t_object *dsp64, double **ins, long numins, dou
         object_method((t_object *)b, gensym("dirty"));
     
     //mark the buffers as free
-    ATOMIC_DECREMENT(&b->b_inuse);
+	buffer_unlocksamples(b);
     
     x->l_index_precedent = index_precedent;
     x->l_valeur = valeur;
