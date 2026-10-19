@@ -1,0 +1,132 @@
+{
+	"patcher" : 	{
+		"fileversion" : 1,
+		"appversion" : 		{
+			"major" : 7,
+			"minor" : 2,
+			"revision" : 1,
+			"architecture" : "x86",
+			"modernui" : 1
+		}
+,
+		"rect" : [ 34.0, 78.0, 997.0, 1084.0 ],
+		"bgcolor" : [ 0.9, 0.9, 0.9, 1.0 ],
+		"editing_bgcolor" : [ 0.9, 0.9, 0.9, 1.0 ],
+		"bglocked" : 0,
+		"openinpresentation" : 0,
+		"default_fontsize" : 12.0,
+		"default_fontface" : 0,
+		"default_fontname" : "Arial",
+		"gridonopen" : 1,
+		"gridsize" : [ 15.0, 15.0 ],
+		"gridsnaponopen" : 1,
+		"objectsnaponopen" : 1,
+		"statusbarvisible" : 2,
+		"toolbarvisible" : 1,
+		"lefttoolbarpinned" : 0,
+		"toptoolbarpinned" : 0,
+		"righttoolbarpinned" : 0,
+		"bottomtoolbarpinned" : 0,
+		"toolbars_unpinned_last_save" : 0,
+		"tallnewobj" : 0,
+		"boxanimatetime" : 200,
+		"enablehscroll" : 1,
+		"enablevscroll" : 1,
+		"devicewidth" : 0.0,
+		"description" : "",
+		"digest" : "",
+		"tags" : "",
+		"style" : "",
+		"subpatcher_template" : "",
+		"boxes" : [ 			{
+				"box" : 				{
+					"fontname" : "Arial",
+					"fontsize" : 12.0,
+					"id" : "obj-3",
+					"maxclass" : "newobj",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 14.5, 980.0, 37.0, 22.0 ],
+					"style" : "",
+					"text" : "out 1"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"code" : "//\tipoke~ - a buffer writter with skipped address filling feature (interpolated or not)\n//\tby Pierre Alexandre Tremblay\n//  http://www.pierrealexandretremblay.com/welcome.html\n\r\n//\tv.2 optimised at the University of Huddersfield, with the help of the dev@cycling74.com comments of Mark Pauley, Alex Harker, Ben Neville and Peter Castine, addressed  to me or to others.\n//\tv.3 updated for Max5\n//\tv.4 added overdub ratio and Max6 support\n\n// gen~ v1. ported by raja the resident alien\n// gen~ v1.1 corrected gen~ for non interp, and improve compatibility with the external, by PATremblay\n\n\n\nwrap_index(index, arrayLength)\n{ while(index >= arrayLength) index -= arrayLength; return index; }\n\n\n\nParam interp(1);\n\nParam overdub(0);\n\nParam chan(0);\n\nBuffer set(\"thebuffer\");\n\nHistory index_precedent(-1);\n\nHistory valeur(0);\n\nHistory nb_val(0);\n\nframes = dim(set);\n\ndemivie = frames * 0.5;\n\nvaleur_entree = in1;\nindex_tampon = in2;\n\nout1 = 0;\n\n\nif (interp)\n{\n\t// dsp loop with interpolation\t\t\t\t\t\n\tif (index_tampon < 0)\t\t\t\t\t\t\t\t\t\t\t// if the writing is stopped\n\t{\n\t\tif (index_precedent >= 0)\t\t\t\t\t\t\t\t\t// and if it is the 1st one to be stopped\n\t\t{\n\t\t\tpoke(set, valeur/nb_val, index_precedent, chan, overdub);\t\t// write the average value at the last given index\n\t\t\tvaleur = 0;\n\t\t\tindex_precedent = -1;\n\t\t}\n\t}\t\t\t\n\telse\n\t{\n\t\tindex = wrap_index(trunc(index_tampon + 0.5),frames);\t\t// round the next index and make sure he is in the buffer's boundaries\n\t\t\t\n\t\tif (index_precedent < 0)\t\t\t\t\t\t\t\t\t// if it is the first index to write, resets the averaging and the values\n\t\t{\n\t\t\tindex_precedent = index;\n\t\t\tnb_val = 0;\n\t\t}\n\t\t\t\n\t\tif (index == index_precedent)\t\t\t\t\t\t\t\t// if the index has not moved, accumulate the value to average later.\n\t\t{\n\t\t\tvaleur += valeur_entree;\n\t\t\tnb_val += 1;\n\t\t}\n\t\telse\t\t\t\t\t\t\t\t\t\t\t\t\t\t// if it moves\n\t\t{\n\t\t\tif (nb_val != 1)\t\t\t\t\t\t\t\t\t\t// is there more than one values to average\n\t\t\t{\n\t\t\t\tvaleur = valeur/nb_val;\t\t\t\t\t\t\t\t// if yes, calculate the average\n\t\t\t\tnb_val = 1;\n\t\t\t}\n\t\t\t\t\n\t\t\tpoke(set, valeur, index_precedent, chan, overdub);\t\t\t\t// write the average value at the last index\n\t\t\n\n\t\t\tpas = index - index_precedent;\t\t\t\t\t\t\t// calculate the step to do\n\t\t\t\t\t\n\t\t\tif (pas > 0)\t\t\t\t\t\t\t\t\t\t\t// are we going up\n\t\t\t{\n\t\t\t\tif (pas > demivie)\t\t\t\t\t\t\t\t\t// is it faster to go the other way round?\n\t\t\t\t{\n\t\t\t\t\tpas -= frames;\t\t\t\t\t\t\t\t\t// calculate the new number of steps\n\t\t\t\t\tcoeff = (valeur_entree - valeur) / pas;\t\t\t// calculate the interpolation coefficient\n\n\n\t\t\t\t\tfor(i=(index_precedent-1);i>=0;i-=1)\t\t\t\t\t// fill the gap to zero\n\t\t\t\t\t{\n\t\t\t\t\t\tvaleur -= coeff;\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\t\t\t\t\t}\n\t\t\t\t\tfor(i=(frames-1);i>index;i-=1)\t\t\t\t\t\t// fill the gap from the top\n\t\t\t\t\t{\n\t\t\t\t\t\tvaleur -= coeff;\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\telse\t\t\t\t\t\t\t\t\t\t\t\t// if not, just fill the gaps\n\t\t\t\t{\n\t\t\t\t\tcoeff = (valeur_entree - valeur) / pas;\t\t\t// calculate the interpolation coefficient\n\t\t\t\t\tfor (i=(index_precedent+1); i<index; i+=1)\n\t\t\t\t\t{\n\t\t\t\t\t\tvaleur += coeff;\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t\telse\t\t\t\t\t\t\t\t\t\t\t\t\t// if we are going down\n\t\t\t{\n\t\t\t\tif ((-pas) > demivie)\t\t\t\t\t\t\t\t// is it faster to go the other way round?\n\t\t\t\t{\n\t\t\t\t\tpas += frames;\t\t\t\t\t\t\t\t\t// calculate the new number of steps\n\t\t\t\t\tcoeff = (valeur_entree - valeur) / pas;\t\t\t// calculate the interpolation coefficient\n\n\n\t\t\t\t\tfor(i=(index_precedent+1);i<frames;i+=1)\t\t\t// fill the gap to the top\n\t\t\t\t\t{\n\t\t\t\t\t\tvaleur += coeff;\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\t\t\t\t\t}\n\t\t\t\t\tfor(i=0;i<index;i+=1)\t\t\t\t\t\t\t// fill the gap from zero\n\t\t\t\t\t{\n\t\t\t\t\t\tvaleur += coeff;\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\telse\t\t\t\t\t\t\t\t\t\t\t\t// if not, just fill the gaps\n\t\t\t\t{\n\t\t\t\t\tcoeff = (valeur_entree - valeur) / pas;\t\t\t// calculate the interpolation coefficient\n\t\t\t\t\tfor (i=(index_precedent-1); i>index; i-=1)\n\t\t\t\t\t{\n\t\t\t\t\t\tvaleur -= coeff;\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\t\t\t\t\t}\t\t\t\t\t\t\t\n\t\t\t\t}\n\t\t\t}\n\t\t\tvaleur = valeur_entree;\t\t\t\t\t\t\t\t\t// transfer the new previous value\n\t\t}\n\n\t\tindex_precedent = index;\t\t\t\t\t\t\t\t\t\t// transfer the new previous address\n\t}\n\n\t\n}\nelse\n{\n\t// dsp loop without interpolation\n\t\t\t\t\t\n\tif (index_tampon < 0)\t\t\t\t\t\t\t\t\t\t\t// if the writing is stopped\n\t{\n\t\tif (index_precedent >= 0)\t\t\t\t\t\t\t\t\t// and if it is the 1st one to be stopped\n\t\t{\n\t\t\tpoke(set, valeur/nb_val, index_precedent, chan, overdub);\t\t// write the average value at the last given index\n\t\t\tvaleur = 0;\n\t\t\tindex_precedent = -1;\n\t\t}\n\t}\t\t\t\n\telse\n\t{\n\t\tindex = wrap_index(trunc(index_tampon + 0.5),frames);\t\t\t// round the next index and make sure he is in the buffer's boundaries\n\t\t\t\n\t\tif (index_precedent < 0)\t\t\t\t\t\t\t\t\t// if it is the first index to write, resets the averaging and the values\n\t\t{\n\t\t\tindex_precedent = index;\n\t\t\tnb_val = 0;\n\t\t}\n\t\t\t\n\t\tif (index == index_precedent)\t\t\t\t\t\t\t\t// if the index has not moved, accumulate the value to average later.\n\t\t{\n\t\t\tvaleur += valeur_entree;\n\t\t\tnb_val += 1;\n\t\t}\n\t\telse\t\t\t\t\t\t\t\t\t\t\t\t\t\t// if it moves\n\t\t{\n\t\t\tif (nb_val != 1)\t\t\t\t\t\t\t\t\t\t// is there more than one values to average\n\t\t\t{\n\t\t\t\tvaleur = valeur/nb_val;\t\t\t\t\t\t\t\t// if yes, calculate the average\n\t\t\t\tnb_val = 1;\n\t\t\t}\n\t\t\t\t\t\t\t\t\n\t\t\tpoke(set, valeur, index_precedent, chan, overdub);\t\t\t\t// write the average value at the last index\n\t\t\t\t\n\t\t\tpas = index - index_precedent;\t\t\t\t\t\t\t// calculate the step to do\n\t\t\t\n\t\t\tif (pas > 0)\t\t\t\t\t\t\t\t\t\t\t// are we going up\n\t\t\t{\n\t\t\t\tif (pas > demivie)\t\t\t\t\t\t\t\t\t// is it faster to go the other way round?\n\t\t\t\t{\n\t\t\t\t\tfor(i=(index_precedent-1);i>=0;i-=1)\t\t\t\t// fill the gap to zero\n\t\t\t\t\t{\n\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\t\t\t\t\t}\n\n\t\t\t\t\tfor(i=(frames-1);i>index;i-=1)\t\t\t\t\t// fill the gap from the top\n\t\t\t\t\t{\n\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\telse\t\t\t\t\t\t\t\t\t\t\t\t// if not, just fill the gaps\n\t\t\t\t{\n\t\t\t\t\tfor (i=(index_precedent+1); i<index; i+=1)\n\n\t\t\t\t\t{\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t\telse\t\t\t\t\t\t\t\t\t\t\t\t\t// if we are going down\n\t\t\t{\n\t\t\t\tif ((-pas) > demivie)\t\t\t\t\t\t\t\t// is it faster to go the other way round?\n\t\t\t\t{\n\t\t\t\t\tfor(i=(index_precedent+1);i<frames;i+=1)\t\t\t// fill the gap to the top\n\n\t\t\t\t\t{\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\n\t\t\t\t\t}\n\t\t\t\t\tfor(i=0;i<index;i+=1)\t\t\t\t\t\t\t// fill the gap from zero\n\n\t\t\t\t\t{\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\telse\t\t\t\t\t\t\t\t\t\t\t\t// if not, just fill the gaps\n\t\t\t\t{\n\t\t\t\t\tfor (i=(index_precedent-1); i>index; i-=1)\n\n\t\t\t\t\t{\n\t\t\t\t\t\tpoke(set, valeur, i, chan, overdub);\n\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t\tvaleur = valeur_entree;\t\t\t\t\t\t\t\t\t// transfer the new previous value\n\t\t}\n\n\t\tindex_precedent = index;\t\t\t\t\t\t\t\t\t\t// transfer the new previous address\n\t}\t\t\n}\n",
+					"fontface" : 0,
+					"fontname" : "Arial",
+					"fontsize" : 12.0,
+					"id" : "obj-5",
+					"maxclass" : "codebox",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 14.5, 38.0, 986.0, 935.0 ],
+					"style" : ""
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"fontname" : "Arial",
+					"fontsize" : 12.0,
+					"id" : "obj-1",
+					"maxclass" : "newobj",
+					"numinlets" : 0,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 14.5, 12.0, 30.0, 22.0 ],
+					"style" : "",
+					"text" : "in 1"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"fontname" : "Arial",
+					"fontsize" : 12.0,
+					"id" : "obj-2",
+					"maxclass" : "newobj",
+					"numinlets" : 0,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 981.5, 12.0, 30.0, 22.0 ],
+					"style" : "",
+					"text" : "in 2"
+				}
+
+			}
+ ],
+		"lines" : [ 			{
+				"patchline" : 				{
+					"destination" : [ "obj-5", 0 ],
+					"disabled" : 0,
+					"hidden" : 0,
+					"source" : [ "obj-1", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-5", 1 ],
+					"disabled" : 0,
+					"hidden" : 0,
+					"source" : [ "obj-2", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-3", 0 ],
+					"disabled" : 0,
+					"hidden" : 0,
+					"source" : [ "obj-5", 0 ]
+				}
+
+			}
+ ]
+	}
+
+}
