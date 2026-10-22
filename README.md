@@ -16,13 +16,12 @@ It was impossible to emulate the musical behaviour of bespoke resampling digital
 Download the package and read the text file.
 
 #### How to build from the source code
-On MacOS, the XCode project should build (tested on XCode 9.2)
-
-On Windows:
-  1. install the 'max-sdk-master' in your Max7 package folder. (tested with SDK Version 7.3.3)
-  2. put the 'ipoke~' folder in the 'max-sdk-master/source/audio'
-  3. double-click on the project. It should compile (tested with VS 2017 Community 15.7.1)
-
-On either, do not forget to build for release, as optimisation is crucial.
+1. download the c74support libfiles, currently at https://github.com/Cycling74/max-sdk-base wherever you want, and copy the path to this SDK
+2. create a build folder, enter it, and run cmake with the following attributes
+-DSDK=path_to_sdk
+-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" (if you want universal binaries) 
+-DCMAKE_BUILD_TYPE=Release (if you want optimised code) 
+..
+3. then run cmake --build .
 
 #### Enjoy! Comments, suggestions and bug reports are welcome.

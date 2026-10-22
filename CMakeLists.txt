@@ -1,24 +1,15 @@
-include(${CMAKE_CURRENT_SOURCE_DIR}/../../max-sdk-base/script/max-pretarget.cmake)
+cmake_minimum_required(VERSION 3.19)
+project(ipoke~)
 
-#############################################################
-# MAX EXTERNAL
-#############################################################
+if(NOT SDK)
+  message(FATAL_ERROR "Pass -DSDK=/path/to/max-sdk-base")
+endif()
 
-include_directories( 
-	"${MAX_SDK_INCLUDES}"
-	"${MAX_SDK_MSP_INCLUDES}"
-	"${MAX_SDK_JIT_INCLUDES}"
-)
+set(C74_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/out")
 
-file(GLOB PROJECT_SRC
-     "*.h"
-	 "*.c"
-     "*.cpp"
-)
-add_library( 
-	${PROJECT_NAME} 
-	MODULE
-	${PROJECT_SRC}
-)
+include(${SDK}/script/max-pretarget.cmake)
+include_directories(${C74_INCLUDES})
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/../../max-sdk-base/script/max-posttarget.cmake)
+add_library(${PROJECT_NAME} MODULE ipoke~.c)
+
+include(${SDK}/script/max-posttarget.cmake)
